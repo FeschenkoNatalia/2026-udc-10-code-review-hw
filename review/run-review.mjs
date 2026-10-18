@@ -49,6 +49,7 @@ const prompt = fs.readFileSync(".claude/commands/review-pr.md", "utf8")
   .replaceAll("$ARGUMENTS", n);
 
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "review-pr-"));
+const workspaceRoots = [workspace, fs.realpathSync(workspace)]; // the CLI may report either form
 for (const p of ["app", "docs/team-conventions.md", prDir]) {
   fs.cpSync(p, path.join(workspace, p), { recursive: true, filter: (src) => !src.includes("node_modules") });
 }
@@ -74,6 +75,16 @@ const result = events.findLast((e) => e.type === "result");
 if (!init || [...init.tools].sort().join() !== "Glob,Grep,Read" || init.mcp_servers.length) {
   fail(`session was not read-only: tools ${JSON.stringify(init?.tools)}, mcp ${JSON.stringify(init?.mcp_servers)}`);
 }
+// Fail closed: every path a tool was asked to touch stays inside the workspace — the model key is in this
+// process's environment, and the full checkout with .git sits next to it in CI.
+const inWorkspace = (p) => workspaceRoots.some((root) => {
+  const rel = path.relative(root, path.resolve(root, p));
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+});
+const outside = events.filter((e) => e.type === "assistant").flatMap((e) => e.message?.content ?? [])
+  .filter((c) => c.type === "tool_use").flatMap((c) => [c.input?.file_path, c.input?.path])
+  .filter((p) => typeof p === "string" && !inWorkspace(p));
+if (outside.length) fail(`tool access outside the workspace: ${outside.join(", ")}`);
 if (!result || result.is_error || typeof result.result !== "string") {
   fail(`review failed: ${result?.result ?? run.stderr}`);
 }
