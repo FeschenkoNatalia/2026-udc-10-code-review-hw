@@ -122,7 +122,7 @@ const run = spawnSync("claude", [
   "-p", "--model", model,
   "--restricted", "--strict-mcp-config", "--tools", reviewer.tools.join(","), "--permission-mode", "dontAsk",
   "--no-session-persistence", "--output-format", "stream-json", "--verbose",
-], { cwd: workspace, input: prompt, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+], { cwd: workspace, input: prompt, encoding: "utf8", timeout: 10 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
 fs.rmSync(workspace, { recursive: true, force: true });
 if (run.error) fail(`could not start claude: ${run.error.message}`);
 

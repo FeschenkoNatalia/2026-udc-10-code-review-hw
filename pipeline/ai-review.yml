@@ -79,7 +79,8 @@ jobs:
 
       - name: R5 — дати не в локальному часі
         run: |
-          if sed -n 's#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" \
+          # String literals first: a date method named in a string is not a call, and "//" in a string is not a comment.
+          if sed -n 's#"[^"]*"#""#g; s#\x27[^\x27]*\x27#\x27\x27#g; s#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" \
              | grep -E '\.(get(Date|Day|Month|FullYear)|toLocaleDateString)\(|new Date\([[:space:]]*[[:alnum:]_$.]+[[:space:]]*,'; then
             echo "::error::R5: обчислення дат у локальному часі"
             exit 1

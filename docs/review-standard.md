@@ -99,10 +99,12 @@ AI-рев'юер нічого не запускає, але порушення, 
 Два кроки, як у CI: спершу тести, потім AI-рев'ю. Потрібні Node 22+ і Claude Code CLI, у який ви увійшли;
 команди — з кореня репо.
 
-**1. Тести (гейт R13)** — накладає PR, проганяє весь набір і повертає базу, навіть коли тести впали:
+**1. Тести (гейт R13)** — в окремому тимчасовому `git worktree` з останнього коміту накладає PR і проганяє весь
+набір. Вашу робочу копію не чіпає; worktree прибирає, навіть коли `git apply` чи тести впали:
 
 ```bash
-git apply review-queue/pr-3/change.diff && (cd app && npm test); git checkout -- app && git clean -fd app
+wt=$(mktemp -d) && git worktree add -q --detach "$wt" \
+  && git -C "$wt" apply review-queue/pr-3/change.diff && (cd "$wt/app" && npm test); git worktree remove --force "$wt"
 ```
 
 Червоні тести — PR не зливається, хоч би що сказав AI, і AI-рев'ю чекає. Автор виправляє код (тест не чіпає)
