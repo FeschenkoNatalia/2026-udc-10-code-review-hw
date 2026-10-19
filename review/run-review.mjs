@@ -70,7 +70,8 @@ const reviewer = reviewers[reviewerName];
 if (!reviewer) fail(`unknown reviewer ${reviewerName}; one of: ${Object.keys(reviewers).join(", ")}`);
 const skillFiles = ["SKILL.md", "CRITERIA.md", "OUTPUT_FORMAT.md"];
 if (reviewerName === "review-task" && !skillFiles.every((f) => fs.existsSync(path.join(skillHome, f)))) {
-  fail(`no skill in ${skillHome}; install it: git clone https://github.com/koldovsky/skill-review-task.git ${skillHome}`);
+  fail(`no skill in ${skillHome}; run without --reviewer to use review-pr, `
+    + `or install it: git clone https://github.com/koldovsky/skill-review-task.git ${skillHome}`);
 }
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
@@ -138,7 +139,8 @@ if (!init || tools !== reviewer.tools.join() || init.mcp_servers.length) {
   fail(`session was not read-only: tools ${JSON.stringify(init?.tools)}, mcp ${JSON.stringify(init?.mcp_servers)}`);
 }
 // Fail closed: every path a tool was asked to touch stays inside the workspace — the model key is in this
-// process's environment, and the full checkout with .git sits next to it in CI.
+// process's environment, and the full checkout with .git sits next to it in CI. A subagent's tool calls come in
+// the same stream as assistant events (with parent_tool_use_id), so they are checked too.
 const inWorkspace = (p) => workspaceRoots.some((root) => {
   const rel = path.relative(root, path.resolve(root, p));
   return !rel.startsWith("..") && !path.isAbsolute(rel);

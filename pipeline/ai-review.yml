@@ -58,10 +58,11 @@ jobs:
       - name: R14 — секрети в комітах PR (gitleaks)
         run: |
           rm -f .gitleaks.toml .gitleaksignore # a PR must not bring its own allowlist
+          # --ignore-gitleaks-allow: nor allow a secret line by line with an inline gitleaks:allow comment
           docker run --rm -v "$PWD:/repo" \
             -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
             zricethezav/gitleaks:v8.18.4@sha256:75bdb2b2f4db213cde0b8295f13a88d6b333091bbfbf3012a4e083d00d31caba \
-            detect --source=/repo --log-opts="--text HEAD^1..HEAD^2" --redact --no-banner
+            detect --source=/repo --log-opts="--text HEAD^1..HEAD^2" --redact --no-banner --ignore-gitleaks-allow
 
       - name: R6 — змінено export без запису в CHANGELOG
         run: |
