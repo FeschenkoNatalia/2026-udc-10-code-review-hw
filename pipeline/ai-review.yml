@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   tests:
-    name: tests (R13 + гейти R5, R6, R14) # the required check in branch protection; no `if`/`needs`, so it is never skipped
+    name: tests # the required check in branch protection: keep the name stable, gates are listed in docs/pipeline.md; no `if`/`needs`, so it is never skipped
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -64,7 +64,9 @@ jobs:
             zricethezav/gitleaks:v8.18.4@sha256:75bdb2b2f4db213cde0b8295f13a88d6b333091bbfbf3012a4e083d00d31caba \
             detect --source=/repo --log-opts="--text HEAD^1..HEAD^2" --redact --no-banner --ignore-gitleaks-allow
 
-      - name: R6 — змінено export без запису в CHANGELOG
+      - name: Сигнал R6 — змінено export без запису в CHANGELOG (не блокує)
+        # A new exported function is a gate (last step); any other changed export line is only a signal:
+        # renaming a parameter changes the line, not the contract.
         run: |
           # Export lines per file, without comments and extra spaces: a comment or whitespace edit is not a change.
           exports() { git show "$1:$2" 2>/dev/null | grep -E '^[[:space:]]*export\b' | sed -E 's#[[:space:]]*//.*##; s#[[:space:]]+# #g; s#^ ##' | sort || true; }
@@ -73,17 +75,16 @@ jobs:
             [ "$(exports HEAD^1 "$f")" = "$(exports HEAD "$f")" ] || changed="$changed $f"
           done
           if [ -n "$changed" ] && git diff --quiet HEAD^1 HEAD -- app/CHANGELOG.md; then
-            echo "::error file=app/CHANGELOG.md::R6: змінено export у${changed}, а CHANGELOG — ні"
-            exit 1
+            echo "::warning file=app/CHANGELOG.md::R6: змінено export у${changed}, а CHANGELOG — ні; перевірте"
           fi
 
-      - name: R5 — дати не в локальному часі
+      - name: Сигнал R5 — дати в локальному часі (не блокує)
+        # A signal, not a gate: a text match is not always a call, e.g. a method name inside a template literal.
         run: |
           # String literals first: a date method named in a string is not a call, and "//" in a string is not a comment.
           if sed -n 's#"[^"]*"#""#g; s#\x27[^\x27]*\x27#\x27\x27#g; s#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" \
              | grep -E '\.(get(Date|Day|Month|FullYear)|toLocaleDateString)\(|new Date\([[:space:]]*[[:alnum:]_$.]+[[:space:]]*,'; then
-            echo "::error::R5: обчислення дат у локальному часі"
-            exit 1
+            echo "::warning::R5: обчислення дат у локальному часі — перевірте"
           fi
 
       - name: Сигнали для рев'юера (R4, R11) — не блокують
@@ -97,7 +98,7 @@ jobs:
           fi
 
       - name: R13 — увесь набір тестів, нічого не вимкнено
-        # Last, because it runs the PR's code. `node --test`, not `npm test`: the PR's scripts.test is not trusted.
+        # After the text checks, because it runs the PR's code. `node --test`, not `npm test`: the PR's scripts.test is not trusted.
         working-directory: app
         run: |
           node --test --test-reporter=spec --test-reporter-destination=stdout \
@@ -106,6 +107,37 @@ jobs:
             echo "::error::R13: тест вимкнено (skip/todo)"
             exit 1
           fi
+
+      - name: R6 — нова експортована функція без запису в CHANGELOG
+        # After R13: it imports the PR's modules, so it runs PR code too. Node reads the exports itself, so a comment,
+        # a string or a renamed parameter cannot trip it; a name the base exports from any module is not new, so
+        # neither can a moved file or function. Classes and constants are left to the R6 signal. Modules are imported
+        # from app/, as R13 imports them; one that cannot be imported gives a warning, since the gate cannot tell.
+        run: |
+          git diff --quiet HEAD^1 HEAD -- app/CHANGELOG.md || exit 0 # an entry exists; whether it is true is for the reviewer
+          mkdir -p "$RUNNER_TEMP/base" && git archive HEAD^1 app | tar -x -C "$RUNNER_TEMP/base"
+          git diff --no-renames --name-only -z --diff-filter=d HEAD^1 HEAD -- 'app/src/*.js' 'app/src/*.mjs' \
+            | node --input-type=module -e '
+                import { readdirSync, readFileSync } from "node:fs";
+                import { pathToFileURL } from "node:url";
+                const load = (file) => import(pathToFileURL(file).href);
+                const isFunction = (v) => typeof v === "function" && !/^class\b/.test(Function.prototype.toString.call(v));
+                const root = process.cwd(), baseApp = `${process.argv[1]}/app`;
+                const known = new Set(); // every name the base exports, from any module in app/src
+                process.chdir(baseApp);
+                for (const f of readdirSync("src", { recursive: true }).filter((f) => /\.m?js$/.test(f)))
+                  for (const name of Object.keys(await load(`${baseApp}/src/${f}`))) known.add(name);
+                process.chdir(`${root}/app`);
+                let found = 0;
+                for (const f of readFileSync(0, "utf8").split("\0").filter(Boolean)) {
+                  const after = await load(`${root}/${f}`).catch((e) => {
+                    console.log(`::warning file=${f}::R6: модуль не імпортується, нові експорти не перевірено: ${String(e?.message).replace(/\s+/g, " ")}`);
+                    return {};
+                  });
+                  const added = Object.keys(after).filter((name) => isFunction(after[name]) && !known.has(name));
+                  if (added.length) { console.log(`::error file=${f}::R6: нова експортована функція ${added.join(", ")}, а CHANGELOG — ні`); found++; }
+                }
+                process.exit(found ? 1 : 0);' "$RUNNER_TEMP/base"
 
   review:
     name: AI-рев'ю # advisory: NOT a required check; its verdict never blocks a merge
