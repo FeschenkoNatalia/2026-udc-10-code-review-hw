@@ -81,9 +81,13 @@ jobs:
       - name: Сигнал R5 — дати в локальному часі (не блокує)
         # A signal, not a gate: a text match is not always a call, e.g. a method name inside a template literal.
         run: |
+          # Matched lines come from the PR, so they cannot be workflow commands: the runner finds "##[" anywhere in
+          # a line and also splits a line at a bare CR, so "::" and "##[" are broken up before the prefix is added.
+          quote() { sed -e 's/::/: :/g' -e 's/##\[/## [/g' -e "s/^/$1> /"; }
           # String literals first: a date method named in a string is not a call, and "//" in a string is not a comment.
-          if sed -n 's#"[^"]*"#""#g; s#\x27[^\x27]*\x27#\x27\x27#g; s#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" \
-             | grep -E '\.(get(Date|Day|Month|FullYear)|toLocaleDateString)\(|new Date\([[:space:]]*[[:alnum:]_$.]+[[:space:]]*,'; then
+          if found=$(sed -n 's#"[^"]*"#""#g; s#\x27[^\x27]*\x27#\x27\x27#g; s#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" \
+             | grep -E '\.(get(Date|Day|Month|FullYear)|toLocaleDateString)\(|new Date\([[:space:]]*[[:alnum:]_$.]+[[:space:]]*,'); then
+            printf '%s\n' "$found" | quote R5
             echo "::warning::R5: обчислення дат у локальному часі — перевірте"
           fi
 
@@ -93,16 +97,18 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           export LC_ALL=C.UTF-8
-          if sed -n 's#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" | grep -E 'грн|toFixed|Intl\.NumberFormat'; then
+          quote() { sed -e 's/::/: :/g' -e 's/##\[/## [/g' -e "s/^/$1> /"; } # as in the R5 step
+          if found=$(sed -n 's#//.*$##; /^+[^+]/p' "$RUNNER_TEMP/src.diff" | grep -E 'грн|toFixed|Intl\.NumberFormat'); then
+            printf '%s\n' "$found" | quote R4
             echo "::warning::R4: форматування грошей в app/src — перевірте"
           fi
-          if grep -E '^\+[^+]' "$RUNNER_TEMP/app.diff" | grep -iE '\b(AI|LLM|reviewers?)\b|рев.{1,3}юер|eslint-disable|nosemgrep'; then
+          if found=$(grep -E '^\+[^+]' "$RUNNER_TEMP/app.diff" | grep -iE '\b(AI|LLM|reviewers?)\b|рев.{1,3}юер|eslint-disable|nosemgrep'); then
+            printf '%s\n' "$found" | quote R11
             echo "::warning::R11: текст, звернений до інструментів чи рев'юерів"
           fi
-          # The same words in the title or description are R12 (in code, R11). Matches get a prefix,
-          # so a line from the PR cannot start a workflow command.
+          # The same words in the title or description are R12 (in code, R11).
           if found=$(printf '%s\n' "$PR_TITLE" "$PR_BODY" | grep -iE '\b(AI|LLM|reviewers?)\b|рев.{1,3}юер|eslint-disable|nosemgrep'); then
-            printf '%s\n' "$found" | sed 's/^/R12> /'
+            printf '%s\n' "$found" | quote R12
             echo "::warning::R12: текст, звернений до інструментів чи рев'юерів, у назві чи описі PR"
           fi
 
